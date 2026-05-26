@@ -87,8 +87,24 @@ function RadarChart({ levels }: { levels: Record<string, number> }) {
   );
 }
 
-function ResultPanel({ record }: { record: AnalysisRecord }) {
+function ResultPanel({ record, onDelete }: { record: AnalysisRecord; onDelete: (id: number) => void }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const r = record.result;
+
+  async function handleDelete() {
+    setDeleting(true);
+    setDeleteError(null);
+    const { error } = await supabase.from('analysis_records').delete().eq('id', record.id);
+    if (error) {
+      setDeleting(false);
+      setDeleteError('삭제에 실패했어요. 다시 시도해주세요.');
+      return;
+    }
+    onDelete(record.id);
+  }
+
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}
       style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -103,6 +119,33 @@ function ResultPanel({ record }: { record: AnalysisRecord }) {
           <p style={{ fontSize: '0.68rem', color: '#c8cdd8', marginTop: 8 }}>
             {new Date(record.created_at).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
           </p>
+          {/* Delete button */}
+          <div style={{ marginTop: 12 }}>
+            {deleteError && (
+              <p style={{ fontSize: '0.7rem', color: '#f43f5e', marginBottom: 6 }}>{deleteError}</p>
+            )}
+            {confirmDelete ? (
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <span style={{ fontSize: '0.72rem', color: '#f43f5e' }}>정말 삭제하시겠어요?</span>
+                <button onClick={handleDelete} disabled={deleting}
+                  style={{ padding: '4px 10px', borderRadius: 6, border: 'none', background: '#f43f5e', color: '#fff', fontSize: '0.72rem', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600, opacity: deleting ? 0.6 : 1 }}>
+                  {deleting ? '삭제 중...' : '삭제'}
+                </button>
+                <button onClick={() => { setConfirmDelete(false); setDeleteError(null); }}
+                  style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid #eaecf2', background: '#fff', color: '#8892a4', fontSize: '0.72rem', cursor: 'pointer', fontFamily: 'inherit' }}>
+                  취소
+                </button>
+              </div>
+            ) : (
+              <button onClick={() => setConfirmDelete(true)}
+                style={{ padding: '4px 12px', borderRadius: 6, border: '1px solid #f43f5e22', background: '#fff5f5', color: '#f43f5e', fontSize: '0.72rem', cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 5 }}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                </svg>
+                기록 삭제
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -195,6 +238,7 @@ function PhotosContent() {
   const [loading, setLoading] = useState(true);
   const [selectedUid, setSelectedUid] = useState<string>(initUid);
   const [selectedRecord, setSelectedRecord] = useState<AnalysisRecord | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     Promise.all([getMyCustomerUids(), fetchUserMap()]).then(async ([uids, map]) => {
@@ -216,6 +260,13 @@ function PhotosContent() {
   }, []);
 
   const uids = useMemo(() => [...new Set(records.map(r => r.uid))], [records]);
+
+  const filteredUids = useMemo(() => {
+    if (!searchQuery.trim()) return uids;
+    const q = searchQuery.trim().toLowerCase();
+    return uids.filter(uid => getDisplayName(uid, userMap).toLowerCase().includes(q));
+  }, [uids, searchQuery, userMap]);
+
   const filteredRecords = useMemo(() =>
     selectedUid ? records.filter(r => r.uid === selectedUid) : records,
     [records, selectedUid]);
@@ -225,11 +276,16 @@ function PhotosContent() {
     setSelectedRecord(null);
   }
 
+  function handleRecordDeleted(id: number) {
+    setRecords(prev => prev.filter(r => r.id !== id));
+    setSelectedRecord(null);
+  }
+
   return (
     <div>
       <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="mb-7">
         <p style={{ fontSize: '0.7rem', color: '#b0b8cc', letterSpacing: '0.15em', marginBottom: 4, fontWeight: 500 }}>SKIN ANALYSIS</p>
-        <h1 style={{ fontSize: '1.4rem', fontWeight: 600, color: '#1a1d27', letterSpacing: '-0.02em', margin: 0 }}>피부 분석 기록</h1>
+        <h1 style={{ fontSize: '1.4rem', fontWeight: 600, color: '#1a1d27', letterSpacing: '-0.02em', margin: 0 }}>피부 데이터 관리</h1>
       </motion.div>
 
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
@@ -240,20 +296,43 @@ function PhotosContent() {
           {/* Customer selector */}
           <div style={CARD}>
             <div style={{ padding: '12px 14px', borderBottom: '1px solid #eaecf2' }}>
-              <p style={{ fontSize: '0.62rem', color: '#b0b8cc', letterSpacing: '0.12em', fontWeight: 500 }}>고객 선택</p>
+              <p style={{ fontSize: '0.62rem', color: '#b0b8cc', letterSpacing: '0.12em', fontWeight: 500, marginBottom: 8 }}>고객 선택</p>
+              {/* Search input */}
+              <div style={{ position: 'relative' }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#b0b8cc" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                  style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>
+                  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+                </svg>
+                <input
+                  type="text"
+                  placeholder="고객명 검색..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  style={{
+                    width: '100%', boxSizing: 'border-box',
+                    padding: '6px 8px 6px 26px',
+                    border: '1px solid #eaecf2', borderRadius: 6,
+                    fontSize: '0.75rem', color: '#1a1d27',
+                    outline: 'none', fontFamily: 'inherit',
+                    background: '#f8f9fc',
+                  }}
+                />
+              </div>
             </div>
             <div style={{ maxHeight: 300, overflowY: 'auto' }}>
-              <button onClick={() => selectUid('')}
-                style={{
-                  width: '100%', padding: '9px 14px', textAlign: 'left', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
-                  background: !selectedUid ? '#f0f0ff' : 'transparent',
-                  color: !selectedUid ? ACCENT : '#4a5568',
-                  fontSize: '0.78rem', fontWeight: !selectedUid ? 600 : 400,
-                  borderBottom: '1px solid #f5f6fa',
-                }}>
-                전체 고객
-                <span style={{ marginLeft: 6, fontSize: '0.65rem', color: '#b0b8cc' }}>({records.length}건)</span>
-              </button>
+              {!searchQuery && (
+                <button onClick={() => selectUid('')}
+                  style={{
+                    width: '100%', padding: '9px 14px', textAlign: 'left', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+                    background: !selectedUid ? '#f0f0ff' : 'transparent',
+                    color: !selectedUid ? ACCENT : '#4a5568',
+                    fontSize: '0.78rem', fontWeight: !selectedUid ? 600 : 400,
+                    borderBottom: '1px solid #f5f6fa',
+                  }}>
+                  전체 고객
+                  <span style={{ marginLeft: 6, fontSize: '0.65rem', color: '#b0b8cc' }}>({records.length}건)</span>
+                </button>
+              )}
               {loading ? (
                 <div style={{ padding: '20px 0', display: 'flex', justifyContent: 'center', gap: 4 }}>
                   {[0, 0.12, 0.24].map((d, i) => (
@@ -262,7 +341,9 @@ function PhotosContent() {
                       transition={{ duration: 0.7, delay: d, repeat: Infinity }} />
                   ))}
                 </div>
-              ) : uids.map(uid => {
+              ) : filteredUids.length === 0 ? (
+                <p style={{ padding: '16px 14px', fontSize: '0.75rem', color: '#c8cdd8', textAlign: 'center' }}>검색 결과 없음</p>
+              ) : filteredUids.map(uid => {
                 const count = records.filter(r => r.uid === uid).length;
                 const isSelected = selectedUid === uid;
                 return (
@@ -296,25 +377,29 @@ function PhotosContent() {
                 {filteredRecords.map(rec => {
                   const isActive = selectedRecord?.id === rec.id;
                   return (
-                    <button key={rec.id} onClick={() => setSelectedRecord(isActive ? null : rec)}
-                      style={{
-                        width: '100%', padding: 0, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
-                        background: isActive ? '#f0f0ff' : 'transparent',
-                        borderBottom: '1px solid #f5f6fa', display: 'flex', alignItems: 'center', gap: 10,
-                      }}
-                      onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = '#f8f9fc'; }}
-                      onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = 'transparent'; }}>
-                      <img src={rec.photo_url} alt=""
-                        style={{ width: 48, height: 48, objectFit: 'cover', flexShrink: 0 }} />
-                      <div style={{ textAlign: 'left', flex: 1, minWidth: 0, paddingRight: 10 }}>
-                        <p style={{ fontSize: '0.72rem', fontWeight: 500, color: isActive ? ACCENT : '#1a1d27', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {rec.result?.concerns?.slice(0, 2).join(', ') ?? '-'}
-                        </p>
-                        <p style={{ fontSize: '0.62rem', color: '#b0b8cc' }}>
-                          {new Date(rec.created_at).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })}
-                        </p>
-                      </div>
-                    </button>
+                    <div key={rec.id} style={{ position: 'relative', borderBottom: '1px solid #f5f6fa' }}>
+                      <button onClick={() => setSelectedRecord(isActive ? null : rec)}
+                        style={{
+                          width: '100%', padding: 0, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+                          background: isActive ? '#f0f0ff' : 'transparent',
+                          display: 'flex', alignItems: 'center', gap: 10,
+                        }}
+                        onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = '#f8f9fc'; }}
+                        onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = 'transparent'; }}>
+                        <img src={rec.photo_url} alt=""
+                          style={{ width: 48, height: 48, objectFit: 'cover', flexShrink: 0 }} />
+                        <div style={{ textAlign: 'left', flex: 1, minWidth: 0, paddingRight: 32 }}>
+                          <p style={{ fontSize: '0.72rem', fontWeight: 500, color: isActive ? ACCENT : '#1a1d27', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {rec.result?.concerns?.slice(0, 2).join(', ') ?? '-'}
+                          </p>
+                          <p style={{ fontSize: '0.62rem', color: '#b0b8cc' }}>
+                            {new Date(rec.created_at).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })}
+                          </p>
+                        </div>
+                      </button>
+                      {/* Delete button per record */}
+                      <DeleteRecordButton recordId={rec.id} onDeleted={handleRecordDeleted} />
+                    </div>
                   );
                 })}
               </div>
@@ -326,7 +411,7 @@ function PhotosContent() {
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.1 }} style={{ flex: 1, minWidth: 0 }}>
           <AnimatePresence mode="wait">
             {selectedRecord ? (
-              <ResultPanel key={selectedRecord.id} record={selectedRecord} />
+              <ResultPanel key={selectedRecord.id} record={selectedRecord} onDelete={handleRecordDeleted} />
             ) : (
               <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                 style={{ ...CARD, padding: '80px 0', textAlign: 'center' }}>
@@ -349,6 +434,60 @@ function PhotosContent() {
         </motion.div>
       </div>
     </div>
+  );
+}
+
+function DeleteRecordButton({ recordId, onDeleted }: { recordId: number; onDeleted: (id: number) => void }) {
+  const [confirm, setConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  async function handleDelete(e: React.MouseEvent) {
+    e.stopPropagation();
+    setDeleting(true);
+    setFailed(false);
+    const { error } = await supabase.from('analysis_records').delete().eq('id', recordId);
+    if (error) {
+      setDeleting(false);
+      setFailed(true);
+      return;
+    }
+    onDeleted(recordId);
+  }
+
+  if (confirm) {
+    return (
+      <div style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', display: 'flex', gap: 3, alignItems: 'center' }}
+        onClick={e => e.stopPropagation()}>
+        {failed && <span style={{ fontSize: '0.58rem', color: '#f43f5e' }}>실패</span>}
+        <button onClick={handleDelete} disabled={deleting}
+          style={{ padding: '2px 6px', borderRadius: 4, border: 'none', background: '#f43f5e', color: '#fff', fontSize: '0.62rem', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600, opacity: deleting ? 0.6 : 1 }}>
+          {deleting ? '...' : '삭제'}
+        </button>
+        <button onClick={e => { e.stopPropagation(); setConfirm(false); setFailed(false); }}
+          style={{ padding: '2px 4px', borderRadius: 4, border: '1px solid #eaecf2', background: '#fff', color: '#8892a4', fontSize: '0.62rem', cursor: 'pointer', fontFamily: 'inherit' }}>
+          취소
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      onClick={e => { e.stopPropagation(); setConfirm(true); }}
+      title="기록 삭제"
+      style={{
+        position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+        padding: '3px', borderRadius: 4, border: 'none', background: 'transparent',
+        color: '#d1d5e0', cursor: 'pointer', display: 'flex', alignItems: 'center',
+      }}
+      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#f43f5e'; (e.currentTarget as HTMLElement).style.background = '#fff5f5'; }}
+      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#d1d5e0'; (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+    >
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/>
+      </svg>
+    </button>
   );
 }
 
