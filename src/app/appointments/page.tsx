@@ -163,6 +163,27 @@ export default function AppointmentsPage() {
     setUpdatingAppt(id);
     await supabase.from('appointments').update({ status }).eq('id', id);
     setAiAppts(prev => prev.map(a => a.id === id ? { ...a, status } : a));
+
+    // 확정 시 treatment_records에도 등록 → 캘린더 & 시술 리스트에 반영
+    if (status === 'confirmed') {
+      const appt = aiAppts.find(a => a.id === id);
+      if (appt) {
+        const session = getSession();
+        const hospitalId = session?.hospitalId ?? null;
+        const isoDate = new Date(`${appt.date}T${appt.time}:00`).toISOString();
+        await supabase.from('treatment_records').insert({
+          uid: appt.uid ?? null,
+          title: `${appt.treatment} 예약 (${appt.name})`,
+          step: 'calendar',
+          start_date: appt.date,
+          schedule: [{ name: appt.treatment, date: isoDate }],
+          past_treatments: [],
+          hospital_id: hospitalId,
+        });
+        loadRecords();
+      }
+    }
+
     setUpdatingAppt(null);
   }
 
