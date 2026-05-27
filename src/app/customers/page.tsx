@@ -10,7 +10,7 @@ import { TREATMENTS, CATEGORIES } from '@/data/treatments';
 import ConfirmDialog from '@/components/ConfirmDialog';
 
 type Customer = { uid: string; updated_at: string | null; memo: string | null };
-type TreatmentPlan = { id: string; title: string; start_date: string; schedule: { name: string; date: string }[] };
+type TreatmentPlan = { id: string; title: string; start_date: string; schedule: { name: string; date: string; status?: string }[]; doctor_id?: number | null; doctor_name?: string | null; hospital_name?: string | null; };
 type ScheduleEvent = { name: string; date: string };
 
 const TIME_SLOTS = Array.from({ length: 27 }, (_, i) => {
@@ -105,10 +105,13 @@ export default function CustomersPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [plans, setPlans] = useState<TreatmentPlan[]>([]);
   const [photos, setPhotos] = useState<DailyPhoto[]>([]);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [completedDays, setCompletedDays] = useState(0);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [search, setSearch] = useState('');
+  const [showCareModal, setShowCareModal] = useState(false);
+  const [showPhotoGallery, setShowPhotoGallery] = useState(false);
 
   // 메모
   const [memo, setMemo] = useState('');
@@ -189,11 +192,11 @@ export default function CustomersPage() {
     const c = customers.find(c => c.uid === selected);
     setMemo(c?.memo ?? '');
     Promise.all([
-      supabase.from('treatment_records').select('*').eq('uid', selected).order('created_at', { ascending: false }),
+      supabase.from('treatment_records').select('*, hospitals(name)').eq('uid', selected).order('created_at', { ascending: false }),
       supabase.from('analysis_records').select('id, uid, photo_url, created_at').eq('uid', selected).order('created_at', { ascending: false }).limit(30),
       supabase.from('daily_completed').select('*', { count: 'exact', head: true }).eq('uid', selected),
     ]).then(([{ data: t }, { data: p }, { count }]) => {
-      setPlans(t ?? []);
+      setPlans((t ?? []).map((p: any) => ({ ...p, hospital_name: p.hospitals?.name ?? null })));
       setPhotos(p ?? []);
       setCompletedDays(count ?? 0);
       setDetailLoading(false);
@@ -336,6 +339,40 @@ export default function CustomersPage() {
 
   return (
     <div>
+      {/* Lightbox */}
+      {lightboxUrl && (
+        <div
+          onClick={() => setLightboxUrl(null)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'rgba(0,0,0,0.88)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'zoom-out',
+          }}
+        >
+          <button
+            onClick={() => setLightboxUrl(null)}
+            style={{
+              position: 'absolute', top: 18, right: 22,
+              background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: '50%',
+              width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', color: '#fff', fontSize: '1rem',
+            }}
+          >✕</button>
+          <img
+            src={lightboxUrl}
+            alt="확대 이미지"
+            onClick={e => e.stopPropagation()}
+            style={{
+              maxWidth: '90vw', maxHeight: '90vh',
+              objectFit: 'contain', borderRadius: 12,
+              boxShadow: '0 8px 48px rgba(0,0,0,0.5)',
+              cursor: 'default',
+            }}
+          />
+        </div>
+      )}
+
       {/* Header */}
       <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="mb-7"
         style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
@@ -433,14 +470,17 @@ export default function CustomersPage() {
                   </div>
                   <div style={{ display: 'flex', gap: 16 }}>
                     {[
-                      { label: '시술 플랜', value: plans.length, color: '#6366f1', bg: '#f0f0ff' },
-                      { label: '케어 완료', value: completedDays, color: '#0ea5e9', bg: '#f0f9ff' },
-                      { label: '피부 사진', value: photos.length, color: '#10b981', bg: '#f0fdf8' },
+                      { label: '시술 플랜', value: plans.length, color: '#6366f1', bg: '#f0f0ff', onClick: () => document.getElementById('tx-plans-section')?.scrollIntoView({ behavior: 'smooth' }) },
+                      { label: '케어 완료', value: completedDays, color: '#0ea5e9', bg: '#f0f9ff', onClick: () => setShowCareModal(true) },
+                      { label: '피부 사진', value: photos.length, color: '#10b981', bg: '#f0fdf8', onClick: () => setShowPhotoGallery(true) },
                     ].map(s => (
-                      <div key={s.label} style={{ textAlign: 'center', padding: '8px 16px', borderRadius: 10, background: s.bg }}>
+                      <button key={s.label} onClick={s.onClick}
+                        style={{ textAlign: 'center', padding: '8px 16px', borderRadius: 10, background: s.bg, border: 'none', cursor: 'pointer', transition: 'opacity 0.15s' }}
+                        onMouseEnter={e => (e.currentTarget.style.opacity = '0.75')}
+                        onMouseLeave={e => (e.currentTarget.style.opacity = '1')}>
                         <p style={{ fontSize: '1.2rem', fontWeight: 700, color: s.color, lineHeight: 1 }}>{detailLoading ? '-' : s.value}</p>
                         <p style={{ fontSize: '0.65rem', color: s.color, opacity: 0.7, marginTop: 3 }}>{s.label}</p>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 </div>
@@ -479,7 +519,7 @@ export default function CustomersPage() {
                     </div>
 
                     {/* Treatment plans */}
-                    <div style={CARD}>
+                    <div id="tx-plans-section" style={CARD}>
                       <div style={{ padding: '16px 20px', borderBottom: '1px solid #f5f6fa', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <div><Label>TREATMENT PLANS</Label><h3 style={{ fontSize: '0.9rem', fontWeight: 600, color: '#1a1d27', margin: 0 }}>시술 스케줄</h3></div>
                         <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={openTxModal}
@@ -520,9 +560,11 @@ export default function CustomersPage() {
                         {photos.length === 0 ? <Empty text="피부 사진이 없습니다" /> : (
                           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: 8 }}>
                             {photos.map((p, i) => (
-                              <button key={i} onClick={() => router.push(`/photos?uid=${selected}&recordId=${p.id}`)}
-                                style={{ aspectRatio: '1', borderRadius: 8, overflow: 'hidden', border: '1px solid #eaecf2', cursor: 'pointer', padding: 0, position: 'relative' }}>
-                                <img src={p.photo_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                              <button key={i} onClick={() => setLightboxUrl(p.photo_url)}
+                                style={{ aspectRatio: '1', borderRadius: 8, overflow: 'hidden', border: '1px solid #eaecf2', cursor: 'zoom-in', padding: 0, position: 'relative' }}>
+                                <img src={p.photo_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'transform 0.15s' }}
+                                  onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.06)')}
+                                  onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')} />
                                 <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,0.5) 0%, transparent 50%)' }} />
                                 <p style={{ position: 'absolute', bottom: 4, left: 0, right: 0, fontSize: '0.55rem', color: '#fff', textAlign: 'center' }}>{new Date(p.created_at).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' })}</p>
                               </button>
@@ -775,6 +817,108 @@ export default function CustomersPage() {
         onConfirm={() => confirmDialog?.onConfirm()}
         onCancel={() => setConfirmDialog(null)}
       />
+
+      {/* 케어 완료 모달 */}
+      <AnimatePresence>
+        {showCareModal && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={() => setShowCareModal(false)}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 24 }}>
+            <motion.div initial={{ scale: 0.94, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.94 }}
+              onClick={e => e.stopPropagation()}
+              style={{ background: '#fff', borderRadius: 16, overflow: 'hidden', width: '100%', maxWidth: 540, maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ padding: '16px 20px', borderBottom: '1px solid #eaecf2', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+                <div>
+                  <p style={{ fontSize: '0.62rem', color: '#b0b8cc', letterSpacing: '0.12em', fontWeight: 500, marginBottom: 2 }}>CARE HISTORY</p>
+                  <h2 style={{ fontSize: '0.95rem', fontWeight: 600, color: '#1a1d27', margin: 0 }}>케어 완료 내역</h2>
+                </div>
+                <button onClick={() => setShowCareModal(false)} style={{ width: 28, height: 28, borderRadius: '50%', border: '1px solid #eaecf2', background: '#f8f9fc', cursor: 'pointer', color: '#8892a4', fontSize: '0.9rem' }}>✕</button>
+              </div>
+              <div style={{ overflowY: 'auto', flex: 1 }}>
+                {(() => {
+                  const completedItems: { name: string; date: string; hospitalName: string | null }[] = [];
+                  plans.forEach(p => {
+                    (p.schedule ?? []).forEach(s => {
+                      if (s.status === '완료') {
+                        completedItems.push({ name: s.name, date: s.date, hospitalName: p.hospital_name ?? null });
+                      }
+                    });
+                  });
+                  completedItems.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                  if (completedItems.length === 0) {
+                    return <p style={{ textAlign: 'center', padding: '40px 0', fontSize: '0.82rem', color: '#c8cdd8' }}>완료된 케어가 없습니다</p>;
+                  }
+                  return completedItems.map((item, i) => {
+                    const d = new Date(item.date);
+                    const dateStr = `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')}`;
+                    const timeStr = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+                    return (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px', borderBottom: '1px solid #f5f6fa' }}>
+                        <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#0ea5e9', flexShrink: 0 }} />
+                        <div style={{ flex: 1 }}>
+                          <p style={{ fontSize: '0.85rem', fontWeight: 500, color: '#1a1d27' }}>{item.name}</p>
+                          {item.hospitalName && <p style={{ fontSize: '0.7rem', color: '#b0b8cc', marginTop: 2 }}>{item.hospitalName}</p>}
+                        </div>
+                        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                          <p style={{ fontSize: '0.75rem', color: '#4a5568' }}>{dateStr}</p>
+                          {timeStr !== '00:00' && <p style={{ fontSize: '0.68rem', color: '#b0b8cc', marginTop: 1 }}>{timeStr}</p>}
+                        </div>
+                        <span style={{ fontSize: '0.65rem', padding: '2px 8px', borderRadius: 20, background: '#f0fdf8', color: '#10b981', border: '1px solid #a7f3d0', flexShrink: 0 }}>완료</span>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+              <div style={{ padding: '12px 20px', borderTop: '1px solid #eaecf2', flexShrink: 0 }}>
+                <p style={{ fontSize: '0.7rem', color: '#b0b8cc' }}>
+                  총 {plans.reduce((acc, p) => acc + (p.schedule ?? []).filter(s => s.status === '완료').length, 0)}건 완료
+                </p>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 피부 사진 갤러리 모달 */}
+      <AnimatePresence>
+        {showPhotoGallery && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={() => setShowPhotoGallery(false)}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 24 }}>
+            <motion.div initial={{ scale: 0.94, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.94 }}
+              onClick={e => e.stopPropagation()}
+              style={{ background: '#fff', borderRadius: 16, overflow: 'hidden', width: '100%', maxWidth: 640, maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ padding: '16px 20px', borderBottom: '1px solid #eaecf2', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+                <div>
+                  <p style={{ fontSize: '0.62rem', color: '#b0b8cc', letterSpacing: '0.12em', fontWeight: 500, marginBottom: 2 }}>SKIN PHOTOS</p>
+                  <h2 style={{ fontSize: '0.95rem', fontWeight: 600, color: '#1a1d27', margin: 0 }}>피부 사진 ({photos.length}장)</h2>
+                </div>
+                <button onClick={() => setShowPhotoGallery(false)} style={{ width: 28, height: 28, borderRadius: '50%', border: '1px solid #eaecf2', background: '#f8f9fc', cursor: 'pointer', color: '#8892a4', fontSize: '0.9rem' }}>✕</button>
+              </div>
+              <div style={{ overflowY: 'auto', flex: 1, padding: 16 }}>
+                {photos.length === 0 ? (
+                  <p style={{ textAlign: 'center', padding: '40px 0', fontSize: '0.82rem', color: '#c8cdd8' }}>피부 사진이 없습니다</p>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10 }}>
+                    {photos.map((p, i) => (
+                      <button key={i} onClick={() => { setShowPhotoGallery(false); setLightboxUrl(p.photo_url); }}
+                        style={{ aspectRatio: '1', borderRadius: 10, overflow: 'hidden', border: '1px solid #eaecf2', cursor: 'zoom-in', padding: 0, position: 'relative', display: 'block' }}>
+                        <img src={p.photo_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'transform 0.15s' }}
+                          onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.05)')}
+                          onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')} />
+                        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,0.55) 0%, transparent 55%)' }} />
+                        <p style={{ position: 'absolute', bottom: 6, left: 0, right: 0, fontSize: '0.6rem', color: '#fff', textAlign: 'center', fontWeight: 500 }}>
+                          {new Date(p.created_at).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' })}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
     </div>
   );

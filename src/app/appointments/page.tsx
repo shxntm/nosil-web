@@ -8,6 +8,7 @@ import { fetchUserMap, getDisplayName, UserMap } from '@/lib/customerName';
 import { getSession } from '@/lib/auth';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
+type AiAppointment = { id: number; name: string; phone: string; date: string; time: string; treatment: string; memo: string | null; status: string; uid: string | null; created_at: string; };
 type EventStatus = '완료' | '지각' | '취소' | '부재' | null;
 type ScheduleEvent = { name: string; date: string; status?: EventStatus };
 type Plan = { id: string; uid: string; title: string; start_date: string; schedule: ScheduleEvent[]; created_at: string };
@@ -129,6 +130,10 @@ export default function AppointmentsPage() {
   const [calMonth, setCalMonth] = useState(today.getMonth());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
 
+  const [aiAppts, setAiAppts] = useState<AiAppointment[]>([]);
+  const [aiLoading, setAiLoading] = useState(true);
+  const [updatingAppt, setUpdatingAppt] = useState<number | null>(null);
+
   // add-event modal
   const [showAddModal, setShowAddModal] = useState(false);
   const [addTime, setAddTime] = useState('10:00');
@@ -145,8 +150,25 @@ export default function AppointmentsPage() {
     setLoading(false);
   }
 
+  async function loadAiAppts() {
+    const hospitalId = getSession()?.hospitalId;
+    let query = supabase.from('appointments').select('*').order('date', { ascending: true });
+    if (hospitalId) query = query.eq('hospital_id', hospitalId);
+    const { data } = await query;
+    setAiAppts(data ?? []);
+    setAiLoading(false);
+  }
+
+  async function updateApptStatus(id: number, status: string) {
+    setUpdatingAppt(id);
+    await supabase.from('appointments').update({ status }).eq('id', id);
+    setAiAppts(prev => prev.map(a => a.id === id ? { ...a, status } : a));
+    setUpdatingAppt(null);
+  }
+
   useEffect(() => {
     loadRecords();
+    loadAiAppts();
     const hospitalId = getSession()?.hospitalId;
     Promise.all([
       hospitalId
@@ -382,6 +404,78 @@ export default function AppointmentsPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* ── AI 예약 요청 ── */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} style={{ ...CARD, marginBottom: 16 }}>
+        <div style={{ padding: '14px 20px', borderBottom: '1px solid #eaecf2', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <p style={{ fontSize: '0.62rem', color: '#b0b8cc', letterSpacing: '0.12em', fontWeight: 500, marginBottom: 2 }}>AI BOOKINGS</p>
+            <h2 style={{ fontSize: '0.9rem', fontWeight: 600, color: '#1a1d27', margin: 0 }}>AI 예약 요청</h2>
+          </div>
+          <span style={{ fontSize: '0.72rem', color: '#6366f1', background: '#f0f0ff', padding: '3px 10px', borderRadius: 20, fontWeight: 500 }}>
+            {aiAppts.filter(a => a.status === 'pending').length}건 대기 중
+          </span>
+        </div>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: '#f8f9fc' }}>
+                {['고객명', '연락처', '시술', '날짜', '시간', '메모', '상태'].map(h => (
+                  <th key={h} style={{ textAlign: 'left', padding: '10px 16px', fontSize: '0.68rem', fontWeight: 600, color: '#8892a4', letterSpacing: '0.08em', borderBottom: '1px solid #eaecf2' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {aiLoading ? (
+                <tr><td colSpan={7} style={{ padding: '24px 0', textAlign: 'center' }}>
+                  <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
+                    {[0, 0.12, 0.24].map((d, i) => (
+                      <motion.div key={i} style={{ width: 5, height: 5, borderRadius: '50%', background: '#d1d5e0' }}
+                        animate={{ opacity: [0.3, 1, 0.3], y: [0, -3, 0] }}
+                        transition={{ duration: 0.7, delay: d, repeat: Infinity }} />
+                    ))}
+                  </div>
+                </td></tr>
+              ) : aiAppts.length === 0 ? (
+                <tr><td colSpan={7} style={{ padding: '24px 0', textAlign: 'center', fontSize: '0.82rem', color: '#c8cdd8' }}>AI 예약 요청이 없습니다.</td></tr>
+              ) : aiAppts.map((a, i) => {
+                const STATUS_MAP: Record<string, { label: string; color: string; bg: string }> = {
+                  pending:   { label: '대기',   color: '#f59e0b', bg: '#fffbeb' },
+                  confirmed: { label: '확정',   color: '#10b981', bg: '#f0fdf8' },
+                  cancelled: { label: '취소',   color: '#f43f5e', bg: '#fff1f2' },
+                };
+                const sc = STATUS_MAP[a.status] ?? { label: a.status, color: '#8892a4', bg: '#f5f6fa' };
+                return (
+                  <motion.tr key={a.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}
+                    style={{ borderBottom: '1px solid #f5f6fa', opacity: updatingAppt === a.id ? 0.5 : 1 }}>
+                    <td style={{ padding: '11px 16px', fontSize: '0.82rem', color: '#1a1d27', fontWeight: 500 }}>{a.name}</td>
+                    <td style={{ padding: '11px 16px', fontSize: '0.78rem', color: '#4a5568', fontFamily: 'monospace' }}>{a.phone}</td>
+                    <td style={{ padding: '11px 16px', fontSize: '0.82rem', color: '#4a5568' }}>
+                      <span style={{ padding: '2px 8px', borderRadius: 20, background: '#f0f0ff', color: '#6366f1', fontSize: '0.7rem' }}>{a.treatment}</span>
+                    </td>
+                    <td style={{ padding: '11px 16px', fontSize: '0.78rem', color: '#4a5568' }}>{a.date}</td>
+                    <td style={{ padding: '11px 16px', fontSize: '0.78rem', color: '#4a5568' }}>{a.time}</td>
+                    <td style={{ padding: '11px 16px', fontSize: '0.75rem', color: '#8892a4', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.memo ?? '-'}</td>
+                    <td style={{ padding: '11px 16px' }}>
+                      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.65rem', padding: '2px 8px', borderRadius: 20, background: sc.bg, color: sc.color, fontWeight: 600, marginRight: 4 }}>{sc.label}</span>
+                        {a.status === 'pending' && (
+                          <>
+                            <button onClick={() => updateApptStatus(a.id, 'confirmed')}
+                              style={{ padding: '3px 10px', borderRadius: 20, border: '1.5px solid #a7f3d0', background: '#f0fdf8', color: '#10b981', fontSize: '0.65rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>확정</button>
+                            <button onClick={() => updateApptStatus(a.id, 'cancelled')}
+                              style={{ padding: '3px 10px', borderRadius: 20, border: '1.5px solid #fecdd3', background: '#fff1f2', color: '#f43f5e', fontSize: '0.65rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>취소</button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </motion.tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </motion.div>
 
       {/* ── Records table ── */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} style={CARD}>
