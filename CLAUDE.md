@@ -1,9 +1,12 @@
 # nosil-web (병원 어드민)
 
+## 중요, 변경사항이 있으면 vercel --prod 로 반영해줘.
+
 ## 스택
 - Next.js 16 + Tailwind 4 + TypeScript
 - Supabase (nosil-app과 동일 DB)
 - App Router (src/app/)
+
 
 ## 기능
 1. 대시보드 - 통계 요약 (고객, 리뷰, 시술)

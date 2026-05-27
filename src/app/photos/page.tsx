@@ -87,10 +87,52 @@ function RadarChart({ levels }: { levels: Record<string, number> }) {
   );
 }
 
+function ImageLightbox({ src, onClose }: { src: string; onClose: () => void }) {
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [onClose]);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1000,
+        background: 'rgba(0,0,0,0.88)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        cursor: 'zoom-out',
+      }}
+    >
+      <button
+        onClick={onClose}
+        style={{
+          position: 'absolute', top: 18, right: 22,
+          background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: '50%',
+          width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'pointer', color: '#fff', fontSize: '1rem',
+        }}
+      >✕</button>
+      <img
+        src={src}
+        alt="확대 이미지"
+        onClick={e => e.stopPropagation()}
+        style={{
+          maxWidth: '90vw', maxHeight: '90vh',
+          objectFit: 'contain', borderRadius: 12,
+          boxShadow: '0 8px 48px rgba(0,0,0,0.5)',
+          cursor: 'default',
+        }}
+      />
+    </div>
+  );
+}
+
 function ResultPanel({ record, onDelete }: { record: AnalysisRecord; onDelete: (id: number) => void }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState(false);
   const r = record.result;
 
   async function handleDelete() {
@@ -109,10 +151,17 @@ function ResultPanel({ record, onDelete }: { record: AnalysisRecord; onDelete: (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}
       style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 
+      {lightbox && <ImageLightbox src={record.photo_url} onClose={() => setLightbox(false)} />}
+
       {/* Photo + Summary */}
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-        <img src={record.photo_url} alt="분석 사진"
-          style={{ width: 140, height: 140, objectFit: 'cover', borderRadius: 10, border: '1px solid #eaecf2', flexShrink: 0 }} />
+        <img
+          src={record.photo_url} alt="분석 사진"
+          onClick={() => setLightbox(true)}
+          style={{ width: 140, height: 140, objectFit: 'cover', borderRadius: 10, border: '1px solid #eaecf2', flexShrink: 0, cursor: 'zoom-in', transition: 'opacity 0.15s' }}
+          onMouseEnter={e => (e.currentTarget.style.opacity = '0.85')}
+          onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
+        />
         <div style={{ flex: 1 }}>
           <p style={{ fontSize: '0.62rem', color: '#b0b8cc', letterSpacing: '0.12em', fontWeight: 500, marginBottom: 6 }}>SUMMARY</p>
           <p style={{ fontSize: '0.82rem', color: '#4a5568', lineHeight: 1.65 }}>{r.summary}</p>
