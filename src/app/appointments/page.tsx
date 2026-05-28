@@ -281,10 +281,31 @@ export default function AppointmentsPage() {
   async function updateEventStatus(plan: Plan, eventIdx: number, status: EventStatus) {
     const key = `${plan.id}-${eventIdx}`;
     setUpdatingEvent(key);
+    const event = plan.schedule[eventIdx];
+    const isToggleOff = event.status === status;
+    const newStatus = isToggleOff ? null : status;
     const newSchedule = plan.schedule.map((e, i) =>
-      i === eventIdx ? { ...e, status: e.status === status ? null : status } : e
+      i === eventIdx ? { ...e, status: newStatus } : e
     );
     await supabase.from('treatment_records').update({ schedule: newSchedule }).eq('id', plan.id);
+
+    if (status === '완료' && plan.uid) {
+      const taskId = `treatment-done-${plan.id}-${eventIdx}`;
+      const dateKey = event.date.slice(0, 10);
+      if (isToggleOff) {
+        await supabase.from('daily_completed').delete().eq('uid', plan.uid).eq('task_id', taskId);
+      } else {
+        await supabase.from('daily_completed').upsert(
+          { uid: plan.uid, task_id: taskId, date_key: dateKey },
+          { onConflict: 'uid,task_id' }
+        );
+        await supabase.from('daily_custom_tasks').upsert(
+          { uid: plan.uid, task_id: taskId, task_text: `${event.name} 시술 완료`, task_icon: '💉', date_key: dateKey, task_time: 'morning' },
+          { onConflict: 'uid,task_id' }
+        );
+      }
+    }
+
     const updated = { ...plan, schedule: newSchedule };
     setRecords(prev => prev.map(r => r.id === plan.id ? updated : r));
     setSelectedRecord(updated);
@@ -530,7 +551,7 @@ export default function AppointmentsPage() {
                 const schedule = (r.schedule as ScheduleEvent[]) ?? [];
                 const counts = countsFromSchedule(schedule);
                 const txNames = Object.keys(counts);
-                const done = schedule.filter(s => new Date(s.date) < new Date()).length;
+                const done = schedule.filter(s => s.status === '완료').length;
                 return (
                   <motion.tr key={r.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}
                     onClick={() => setSelectedRecord(selectedRecord?.id === r.id ? null : r)}
