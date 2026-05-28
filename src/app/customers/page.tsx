@@ -106,11 +106,11 @@ export default function CustomersPage() {
   const [plans, setPlans] = useState<TreatmentPlan[]>([]);
   const [photos, setPhotos] = useState<DailyPhoto[]>([]);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
-  const [completedDays, setCompletedDays] = useState(0);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [showCareModal, setShowCareModal] = useState(false);
+  const [careItems, setCareItems] = useState<{ taskId: string; dateKey: string; taskText: string; taskIcon: string }[]>([]);
   const [showPhotoGallery, setShowPhotoGallery] = useState(false);
 
   // 메모
@@ -194,11 +194,19 @@ export default function CustomersPage() {
     Promise.all([
       supabase.from('treatment_records').select('*, hospitals(name)').eq('uid', selected).order('created_at', { ascending: false }),
       supabase.from('analysis_records').select('id, uid, photo_url, created_at').eq('uid', selected).order('created_at', { ascending: false }).limit(30),
-      supabase.from('daily_completed').select('*', { count: 'exact', head: true }).eq('uid', selected),
-    ]).then(([{ data: t }, { data: p }, { count }]) => {
+      supabase.from('daily_completed').select('task_id, date_key').eq('uid', selected).order('date_key', { ascending: false }),
+      supabase.from('daily_custom_tasks').select('task_id, task_text, task_icon').eq('uid', selected),
+    ]).then(([{ data: t }, { data: p }, { data: completed }, { data: customTasks }]) => {
       setPlans((t ?? []).map((p: any) => ({ ...p, hospital_name: p.hospitals?.name ?? null })));
       setPhotos(p ?? []);
-      setCompletedDays(count ?? 0);
+      const taskMap: Record<string, { text: string; icon: string }> = {};
+      (customTasks ?? []).forEach((t: any) => { taskMap[t.task_id] = { text: t.task_text, icon: t.task_icon }; });
+      setCareItems((completed ?? []).map((c: any) => ({
+        taskId: c.task_id,
+        dateKey: c.date_key,
+        taskText: taskMap[c.task_id]?.text ?? '케어 완료',
+        taskIcon: taskMap[c.task_id]?.icon ?? '✅',
+      })));
       setDetailLoading(false);
     });
   }, [selected]);
@@ -248,6 +256,10 @@ export default function CustomersPage() {
         await loadCustomers();
       },
     });
+  }
+
+  function openCareModal() {
+    setShowCareModal(true);
   }
 
   function openTxModal() {
@@ -471,7 +483,7 @@ export default function CustomersPage() {
                   <div style={{ display: 'flex', gap: 16 }}>
                     {[
                       { label: '시술 플랜', value: plans.length, color: '#6366f1', bg: '#f0f0ff', onClick: () => document.getElementById('tx-plans-section')?.scrollIntoView({ behavior: 'smooth' }) },
-                      { label: '케어 완료', value: completedDays, color: '#0ea5e9', bg: '#f0f9ff', onClick: () => setShowCareModal(true) },
+                      { label: '케어 완료', value: new Set(careItems.map(i => i.dateKey)).size, color: '#0ea5e9', bg: '#f0f9ff', onClick: openCareModal },
                       { label: '피부 사진', value: photos.length, color: '#10b981', bg: '#f0fdf8', onClick: () => setShowPhotoGallery(true) },
                     ].map(s => (
                       <button key={s.label} onClick={s.onClick}
@@ -835,44 +847,27 @@ export default function CustomersPage() {
                 <button onClick={() => setShowCareModal(false)} style={{ width: 28, height: 28, borderRadius: '50%', border: '1px solid #eaecf2', background: '#f8f9fc', cursor: 'pointer', color: '#8892a4', fontSize: '0.9rem' }}>✕</button>
               </div>
               <div style={{ overflowY: 'auto', flex: 1 }}>
-                {(() => {
-                  const completedItems: { name: string; date: string; hospitalName: string | null }[] = [];
-                  plans.forEach(p => {
-                    (p.schedule ?? []).forEach(s => {
-                      if (s.status === '완료') {
-                        completedItems.push({ name: s.name, date: s.date, hospitalName: p.hospital_name ?? null });
-                      }
-                    });
-                  });
-                  completedItems.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-                  if (completedItems.length === 0) {
-                    return <p style={{ textAlign: 'center', padding: '40px 0', fontSize: '0.82rem', color: '#c8cdd8' }}>완료된 케어가 없습니다</p>;
-                  }
-                  return completedItems.map((item, i) => {
-                    const d = new Date(item.date);
-                    const dateStr = `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')}`;
-                    const timeStr = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-                    return (
-                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px', borderBottom: '1px solid #f5f6fa' }}>
-                        <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#0ea5e9', flexShrink: 0 }} />
-                        <div style={{ flex: 1 }}>
-                          <p style={{ fontSize: '0.85rem', fontWeight: 500, color: '#1a1d27' }}>{item.name}</p>
-                          {item.hospitalName && <p style={{ fontSize: '0.7rem', color: '#b0b8cc', marginTop: 2 }}>{item.hospitalName}</p>}
-                        </div>
-                        <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                          <p style={{ fontSize: '0.75rem', color: '#4a5568' }}>{dateStr}</p>
-                          {timeStr !== '00:00' && <p style={{ fontSize: '0.68rem', color: '#b0b8cc', marginTop: 1 }}>{timeStr}</p>}
-                        </div>
-                        <span style={{ fontSize: '0.65rem', padding: '2px 8px', borderRadius: 20, background: '#f0fdf8', color: '#10b981', border: '1px solid #a7f3d0', flexShrink: 0 }}>완료</span>
+                {careItems.length === 0 ? (
+                  <p style={{ textAlign: 'center', padding: '40px 0', fontSize: '0.82rem', color: '#c8cdd8' }}>완료된 케어가 없습니다</p>
+                ) : careItems.map((item, i) => {
+                  const [y, m, dd] = item.dateKey.split('-');
+                  const dateStr = `${y}.${m}.${dd}`;
+                  return (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px', borderBottom: '1px solid #f5f6fa' }}>
+                      <span style={{ fontSize: '1rem', flexShrink: 0 }}>{item.taskIcon}</span>
+                      <div style={{ flex: 1 }}>
+                        <p style={{ fontSize: '0.85rem', fontWeight: 500, color: '#1a1d27' }}>{item.taskText}</p>
                       </div>
-                    );
-                  });
-                })()}
+                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                        <p style={{ fontSize: '0.75rem', color: '#4a5568' }}>{dateStr}</p>
+                      </div>
+                      <span style={{ fontSize: '0.65rem', padding: '2px 8px', borderRadius: 20, background: '#f0fdf8', color: '#10b981', border: '1px solid #a7f3d0', flexShrink: 0 }}>완료</span>
+                    </div>
+                  );
+                })}
               </div>
               <div style={{ padding: '12px 20px', borderTop: '1px solid #eaecf2', flexShrink: 0 }}>
-                <p style={{ fontSize: '0.7rem', color: '#b0b8cc' }}>
-                  총 {plans.reduce((acc, p) => acc + (p.schedule ?? []).filter(s => s.status === '완료').length, 0)}건 완료
-                </p>
+                <p style={{ fontSize: '0.7rem', color: '#b0b8cc' }}>총 {new Set(careItems.map(i => i.dateKey)).size}일 완료 ({careItems.length}건)</p>
               </div>
             </motion.div>
           </motion.div>
