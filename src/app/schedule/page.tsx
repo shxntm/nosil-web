@@ -66,10 +66,35 @@ export default function SchedulePage() {
     setUpdatingKey(key);
     const plan = plans.find(p => p.id === planId);
     if (!plan) { setUpdatingKey(null); return; }
+    const event = plan.schedule[eventIdx];
+    const isToggleOff = event.status === status;
+    const newStatus = isToggleOff ? null : status;
     const newSchedule = plan.schedule.map((e, i) =>
-      i === eventIdx ? { ...e, status: e.status === status ? null : status } : e
+      i === eventIdx ? { ...e, status: newStatus } : e
     );
+    const taskId = `treatment-done-${planId}-${eventIdx}`;
+    const dateKey = event.date.slice(0, 10);
+
     await supabase.from('treatment_records').update({ schedule: newSchedule }).eq('id', planId);
+
+    if (status === '완료') {
+      if (isToggleOff) {
+        // 완료 해제 → daily_completed에서 삭제
+        await supabase.from('daily_completed').delete().eq('uid', plan.uid).eq('task_id', taskId);
+      } else {
+        // 완료 체크 → daily_completed에 기록
+        await supabase.from('daily_completed').upsert(
+          { uid: plan.uid, task_id: taskId, date_key: dateKey },
+          { onConflict: 'uid,task_id' }
+        );
+        // daily_custom_tasks에 태스크 텍스트/아이콘 등록 (없으면)
+        await supabase.from('daily_custom_tasks').upsert(
+          { uid: plan.uid, task_id: taskId, task_text: `${event.name} 시술 완료`, task_icon: '💉', date_key: dateKey, task_time: 'morning' },
+          { onConflict: 'uid,task_id' }
+        );
+      }
+    }
+
     setPlans(prev => prev.map(p => p.id === planId ? { ...p, schedule: newSchedule } : p));
     setUpdatingKey(null);
   }

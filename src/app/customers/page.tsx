@@ -189,6 +189,9 @@ export default function CustomersPage() {
   useEffect(() => {
     if (!selected) return;
     setDetailLoading(true);
+    setPlans([]);
+    setPhotos([]);
+    setCareItems([]);
     const c = customers.find(c => c.uid === selected);
     setMemo(c?.memo ?? '');
     Promise.all([
@@ -207,6 +210,8 @@ export default function CustomersPage() {
         taskText: taskMap[c.task_id]?.text ?? '케어 완료',
         taskIcon: taskMap[c.task_id]?.icon ?? '✅',
       })));
+      setDetailLoading(false);
+    }).catch(() => {
       setDetailLoading(false);
     });
   }, [selected]);
