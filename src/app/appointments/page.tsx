@@ -216,8 +216,8 @@ export default function AppointmentsPage() {
 
   function confirmAddEvent() {
     if (addCart.length === 0 || !selectedDate) return;
-    const dateStr = selectedDate.toISOString().slice(0, 10);
-    const iso = new Date(`${dateStr}T${addTime}:00`).toISOString();
+    const dateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
+    const iso = `${dateStr}T${addTime}:00`;
     const newEvents = addCart.flatMap(item => Array.from({ length: item.count }, () => ({ name: item.name, date: iso })));
     setEvents(prev => [...prev, ...newEvents]);
     setShowAddModal(false);
